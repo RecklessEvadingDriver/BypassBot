@@ -1,0 +1,82 @@
+# hd.py (updated)
+import requests
+from bs4 import BeautifulSoup
+import re
+
+class HDHubBypass:
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+
+    def get_search_results(self, query: str, base_domain: str = "https://hdhub4u.menu"):
+        url = f"{base_domain}/?s={query}"
+        r = self.session.get(url)
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        results = []
+        for post in soup.select(".recent-movies > li.thumb"):
+            title_elem = post.select_one("figcaption a p")
+            link_elem = post.select_one("figure a")
+            poster_elem = post.select_one("figure img")
+            
+            if title_elem and link_elem:
+                results.append({
+                    "title": title_elem.text.strip(),
+                    "url": link_elem["href"],
+                    "poster": poster_elem["src"] if poster_elem else None
+                })
+        return results
+
+    def get_movie_or_series_links(self, url):
+        # Extract domain for referer
+        domain_match = re.search(r'(https?://[^/]+)', url)
+        if domain_match:
+            self.session.headers.update({'Referer': domain_match.group(0) + '/'})
+        
+        r = self.session.get(url)
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        title_elem = soup.select_one("h1.page-title")
+        title = title_elem.text.strip() if title_elem else "Unknown Title"
+
+        # --- Movies (direct qualities) ---
+        qualities = {}
+        for link in soup.select("h3 a, h4 a, .download-link, a[href*='download']"):
+            text = link.text.strip()
+            href = link.get("href", "")
+
+            if re.search(r"(480p|720p|1080p|2160p|4K)", text, re.I):
+                quality = re.search(r"(480p|720p|1080p|2160p|4K)", text, re.I).group(1)
+                # Make relative URLs absolute
+                if href.startswith('/'):
+                    domain = re.search(r'(https?://[^/]+)', url).group(1)
+                    href = domain + href
+                qualities[quality] = href
+
+        # Also check for common download patterns
+        download_patterns = [
+            r'href="([^"]*\.(mkv|mp4|avi|mov)[^"]*)"',
+            r'download-link["\'][^>]*href="([^"]+)"',
+            r'file["\'][^>]*href="([^"]+)"'
+        ]
+        
+        for pattern in download_patterns:
+            matches = re.findall(pattern, r.text)
+            for match in matches:
+                href = match[0] if isinstance(match, tuple) else match
+                if href.startswith('/'):
+                    domain = re.search(r'(https?://[^/]+)', url).group(1)
+                    href = domain + href
+                if '720p' in href and '720p' not in qualities:
+                    qualities['720p'] = href
+                elif '1080p' in href and '1080p' not in qualities:
+                    qualities['1080p'] = href
+                elif '480p' in href and '480p' not in qualities:
+                    qualities['480p'] = href
+
+        return {
+            "title": title,
+            "qualities": qualities
+        }

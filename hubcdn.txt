@@ -1,0 +1,139 @@
+# hubcdn.py (updated)
+import sys
+import re
+import base64
+import requests
+import json
+import time
+
+class HubCDNBypass:
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+
+    def rot13(self, s: str) -> str:
+        return ''.join(
+            chr((ord(c) - (65 if c.isupper() else 97) + 13) % 26 + (65 if c.isupper() else 97)) if c.isalpha() else c
+            for c in s
+        )
+
+    def decode_string(self, encrypted_string: str):
+        try:
+            # First base64 decode
+            decoded = base64.b64decode(encrypted_string).decode()
+            # Second base64 decode
+            decoded = base64.b64decode(decoded).decode()
+            # ROT13
+            decoded = self.rot13(decoded)
+            # Third base64 decode
+            decoded = base64.b64decode(decoded).decode()
+            return json.loads(decoded)
+        except Exception as e:
+            print("❌ Error decoding string:", e)
+            return None
+
+    def get_redirect_links(self, url: str):
+        """Implements the _wp_http wait+decode trick"""
+        # Extract domain for referer
+        domain_match = re.search(r'(https?://[^/]+)', url)
+        if domain_match:
+            self.session.headers.update({'Referer': domain_match.group(0) + '/'})
+        
+        res = self.session.get(url)
+        res_text = res.text
+
+        regex = re.compile(r"ck\('_wp_http_\d+','([^']+)'")
+        combined = "".join(m.group(1) for m in regex.finditer(res_text))
+
+        if not combined:
+            print("❌ Could not extract wp_http tokens")
+            return url
+
+        try:
+            decoded = base64.b64decode(combined).decode()
+            decoded = base64.b64decode(decoded).decode()
+            decoded = self.rot13(decoded)
+            decoded = base64.b64decode(decoded).decode()
+            data = json.loads(decoded)
+        except Exception as e:
+            print("❌ Error decoding wp_http tokens:", e)
+            return url
+
+        token = base64.b64encode(data.get("data", "").encode()).decode()
+        blog_link = f'{data.get("wp_http1")}?re={token}'
+
+        # Wait for required delay (total_time + 3 sec)
+        wait_time = int(data.get("total_time", 0)) + 3
+        print(f"⏳ Waiting {wait_time}s before fetching redirect...")
+        time.sleep(wait_time)
+
+        # Retry until not "Invalid Request"
+        for _ in range(5):
+            r = self.session.get(blog_link)
+            if "Invalid Request" not in r.text:
+                m = re.search(r'var reurl\s*=\s*"([^"]+)"', r.text)
+                if m:
+                    return m.group(1)
+                return blog_link
+            time.sleep(2)
+
+        print("❌ Failed to resolve redirect link")
+        return url
+
+    def extract_hubcdn(self, url):
+        # Extract domain for referer
+        domain_match = re.search(r'(https?://[^/]+)', url)
+        if domain_match:
+            self.session.headers.update({'Referer': domain_match.group(0) + '/'})
+        
+        res = self.session.get(url)
+        if res.status_code != 200:
+            print(f"❌ Failed to fetch {url}")
+            return None
+
+        text = res.text
+
+        # Case 1: HubCDN with s('o','...')
+        match = re.search(r"s\('o','([^']+)'", text)
+        if match:
+            encrypted = match.group(1)
+            decoded = self.decode_string(encrypted)
+            if not decoded or "o" not in decoded:
+                print("❌ Failed to decode payload")
+                return None
+            link = base64.b64decode(decoded["o"]).decode()
+            print("✅ Step1 decoded link:", link)
+
+            # Step2: Resolve redirect with wp_http
+            final_link = self.get_redirect_links(link)
+            print("✅ Final Link:", final_link)
+            return final_link
+
+        # Case 2: Direct wp_http based (taazabull24 type)
+        if "ck('_wp_http_" in text:
+            final_link = self.get_redirect_links(url)
+            print("✅ Final Link:", final_link)
+            return final_link
+
+        # Case 3: Try other common patterns
+        common_patterns = [
+            r'window\.location\s*=\s*["\']([^"\']+)["\']',
+            r'downloadUrl\s*=\s*["\']([^"\']+)["\']',
+            r'fileLink\s*=\s*["\']([^"\']+)["\']',
+            r'<a[^>]*href="([^"]*\.(mp4|mkv|avi)[^"]*)"',
+        ]
+        
+        for pattern in common_patterns:
+            match = re.search(pattern, text)
+            if match:
+                link = match.group(1)
+                if link.startswith('/'):
+                    domain = re.search(r'(https?://[^/]+)', url).group(1)
+                    link = domain + link
+                print("✅ Found link via pattern:", link)
+                return link
+
+        print("❌ Could not parse this page")
+        return None

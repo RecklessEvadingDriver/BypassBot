@@ -1,0 +1,51 @@
+# hubcloud.py (updated)
+import requests
+import re
+
+class HubCloudBypass:
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'
+        })
+
+    def extract(self, url):
+        try:
+            # Extract domain for referer
+            domain_match = re.search(r'(https?://[^/]+)', url)
+            if domain_match:
+                self.session.headers.update({'Referer': domain_match.group(0) + '/'})
+
+            response = self.session.post(url).text
+
+            base_match = re.search(r"var\s+url\s*=\s*'(https?:\/\/[^\s]+)'", response)
+            if not base_match:
+                return None
+            
+            base_url = base_match.group(1)
+            response = self.session.get(base_url).text
+
+            video_patterns = [
+                r"https:\/\/cdn\.fsl-buckets\.xyz\/[^\s\"'<>]+",
+                r"https:\/\/pixeldrain\.\w+\/api\/file\/[^\s\"'<>]+",
+                r"https:\/\/pixel\.hubcdn\.\w+\/\?id=[^\s\"'<>]+",
+                r"https:\/\/pub\.pixeldrain\.\w+[^\s\"'<>]+",
+                r"https:\/\/pixeldrain\.\w+[^\s\"'<>]+",
+                r"https:\/\/[^\/\s]+\.pixeldrain[^\s\"'<>]+",
+                r"https:\/\/pub[^\s]+",
+                r"https:\/\/[^\s]*pixeldrain[^\s\"'<>]*",
+                r"https:\/\/[^\s]+\.\w+\/[^\s\"'<>]+\.(mp4|mkv|avi)",
+            ]
+            
+            video_url = None
+            for pattern in video_patterns:
+                video_match = re.search(pattern, response)
+                if video_match:
+                    video_url = video_match.group(0).replace("\"", "").replace("'", "")
+                    break
+            
+            return video_url
+
+        except Exception as e:
+            print(f"Error: {e}")
+            return None
