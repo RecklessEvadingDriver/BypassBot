@@ -1,0 +1,28 @@
+{
+  "name": "Universal Link Bypasser Bot",
+  "description": "A Telegram bot that bypasses download links from various services",
+  "repository": "https://github.com/your-username/your-repo-name",
+  "logo": "https://img.icons8.com/color/96/000000/telegram-app.png",
+  "keywords": ["telegram", "bot", "bypass", "download"],
+  "env": {
+    "BOT_TOKEN": {
+      "description": "Your Telegram Bot Token from @BotFather",
+      "value": "8448879195:AAEmAHX2Cyz6r7GDSnSXsJ9-MpMzxT2lK54"
+    },
+    "ADMIN_ID": {
+      "description": "Your Telegram User ID",
+      "value": "8127197499"
+    }
+  },
+  "formation": {
+    "worker": {
+      "quantity": 1,
+      "size": "eco"
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ]
+}
